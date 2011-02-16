@@ -98,6 +98,34 @@ module Texticle
       }
     }
 
+    # super_search (search/tsearch), OR
+    super_trigram_scope_lambda = lambda { |term|
+      # Let's extract the individual terms to allow for quoted and wildcard terms.
+      ts_query_term = term.scan(/"([^"]+)"|(\S+)/).flatten.compact.map do |lex|
+        lex.gsub!(' ', '\\ ')
+        lex =~ /(.+)\*\s*$/ ? "#{$1}:*" : lex
+      end.join(' & ')
+
+      trigram_term = "'#{term.gsub("'", "''")}'" # " because emacs ruby-mode is totally confused by this line
+
+      similarities = this_index.index_columns.values.flatten.inject([]) do |array, index|
+        array << "similarity(#{quoted_table_name}.#{index}, #{trigram_term})"
+      end.join(" + ")
+
+      conditions = this_index.index_columns.values.flatten.inject([]) do |array, index|
+        array << "(#{quoted_table_name}.#{index} % #{trigram_term})"
+      end.join(" OR ")
+
+      {
+        :select => "#{table_name}.*, (ts_rank_cd((#{this_index.to_s}),
+          to_tsquery(#{connection.quote(dictionary)}, #{connection.quote(ts_query_term)}))*10.0) + #{similarities} as rank",
+        :conditions =>
+          ["#{conditions} OR (#{this_index.to_s} @@ to_tsquery(?,?))", dictionary, ts_query_term],
+        :order => 'rank DESC'
+      }
+
+    }
+
     class_eval do
       # Trying to avoid the deprecation warning when using :named_scope
       # that Rails 3 emits. Can't use #respond_to?(:scope) since scope
@@ -107,9 +135,11 @@ module Texticle
 
         scope search_name.to_sym, scope_lamba
         scope(('t' + search_name).to_sym, trigram_scope_lambda)
+        scope(('super_' + search_name).to_sym, super_trigram_scope_lambda)
       elsif self.respond_to? :named_scope
         named_scope search_name.to_sym, scope_lamba
         named_scope(('t' + search_name).to_sym, trigram_scope_lambda)
+        named_scope(('super_' + search_name).to_sym, super_trigram_scope_lambda)
       end
     end
   end
