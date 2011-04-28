@@ -15,7 +15,7 @@ module Texticle
     def self.find_constant_of(filename)
       file_dir_name = File.dirname(filename)
       base_name = File.basename(filename, '.rb')
-      rel_path = file_dir_name.gsub(Rails.root + 'app' + 'models',"")
+      rel_path = file_dir_name.gsub(File.join(Rails.root,"app","models"),"")
       class_name = [rel_path,base_name].join('/').pluralize.classify
       class_name.constantize
     end
